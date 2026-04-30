@@ -6,6 +6,35 @@
 const STORAGE_KEY = 'forwardRules';
 const LOCAL_SERVER_KEY = 'localServerBase';
 const ENABLED_KEY = 'globalEnabled';
+const NATIVE_HOST = 'com.autoforward.host';
+
+/**
+ * 确保本地服务器正在运行，未运行则通过 Native Messaging 自动启动
+ */
+async function ensureServerRunning(serverBase) {
+  try {
+    const resp = await fetch(serverBase.replace(/\/$/, '') + '/ping', {
+      signal: AbortSignal.timeout(1000)
+    });
+    if (resp.ok) return true;
+  } catch (e) { /* 服务器未运行 */ }
+
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST, { action: 'start_server' }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn('[JS Auto Forward] Native Messaging 不可用:', chrome.runtime.lastError.message);
+          resolve(false);
+          return;
+        }
+        console.log('[JS Auto Forward] 服务器启动结果:', response);
+        resolve(response?.success || false);
+      });
+    } catch (e) {
+      resolve(false);
+    }
+  });
+}
 
 /**
  * 从 storage 加载所有转发规则
@@ -47,6 +76,8 @@ async function applyRules() {
     updateBadge(true, 0);
     return;
   }
+  // 有激活规则时，确保本地服务器已启动
+  await ensureServerRunning(serverBase);
 
   // 构建 declarativeNetRequest 规则
   const netRules = activeRules.map((rule, index) => {
